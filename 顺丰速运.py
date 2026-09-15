@@ -1,17 +1,18 @@
 #!/usr/bin/python3
 # -- coding: utf-8 --
 """
-抓包步骤（仅在 cookie 过期且 redirect URL 失效时）：
-  打开顺丰速运小程序 → 我的 → 积分
-  抓包筛选 activityRedirect
-  复制完整 URL，设置到 ONESIGN_SFSY_TOKEN 变量中
-  多账号用 # 分割
+ONESIGN_SFSY_TOKEN 支持两种模式：
+  mode 1: activityRedirect 完整 URL（推荐，可自动建立新会话）
+    抓包方法: 顺丰速运小程序 → 我的 → 积分 → 筛选 activityRedirect → 复制完整 URL
+    多账号用 # 分割
+  mode 2: linkCode 短码
+    从小程序分享链接中提取 linkCode 参数值（如 SFAC20230803190840424）
+    脚本会自动构造页面 URL 尝试建立会话
+    注意: linkCode 模式仍需在小程序内完成一次微信授权后 cookie 才能生效
 
-Cookie 持久化：
-  首次登录成功后 cookie 会保存到同目录下的 .sfsy_cookies.json，
-  之后运行会优先使用已保存的 cookie。
-  当 cookie 过期时会尝试用 redirect URL 重新登录；
-  仅当 cookie 和 redirect URL 都失效时才需要重新抓包。
+Cookie 持久化:
+  首次登录成功后 cookie 保存到 local.nosync/.sfsy_cookies.json（gitignore 安全），
+  之后运行优先使用已保存的 cookie。
 """
 import hashlib
 import json
@@ -26,9 +27,15 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 SCRIPT_NAME = "顺丰速运"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-COOKIE_FILE = os.path.join(SCRIPT_DIR, ".sfsy_cookies.json")
+COOKIE_DIR = os.path.dirname(SCRIPT_DIR) if os.path.basename(SCRIPT_DIR) == 'scripts' else SCRIPT_DIR
+# Cookie 文件存到 local.nosync/（已在 .gitignore 中），防止公开仓库泄露
+NOSYNC_DIR = os.path.join(COOKIE_DIR, 'local.nosync')
+if os.path.exists(NOSYNC_DIR):
+    COOKIE_FILE = os.path.join(NOSYNC_DIR, '.sfsy_cookies.json')
+else:
+    COOKIE_FILE = os.path.join(os.path.expanduser('~'), '.onesign_sfsy_cookies.json')
 
-UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36 NetType/WIFI MicroMessenger/7.0.20.1781(0x6700143B) WindowsWechat(0x63090551) XWEB/6945 Flue'
+UA = 'Mozilla/5.0 (Linux; Android 15; RMX5062 Build/UKQ1.231108.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.189 Mobile Safari/537.36 XWEB/1500135 MMWEBSDK/20260502 MMWEBID/784 MicroMessenger/8.0.76.3141(0x28004C54) WeChat/arm64 Weixin NetType/VPN:com.network.proxy Language/zh_CN ABI/arm64 miniProgram/wxd4185d00bf7e08ac'
 
 
 def Log(cont=''):
@@ -76,15 +83,14 @@ class RUN:
         self.s.verify = False
         self.headers = {
             'Host': 'mcs-mimp-web.sf-express.com',
-            'upgrade-insecure-requests': '1',
             'user-agent': UA,
-            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-            'sec-fetch-site': 'none',
-            'sec-fetch-mode': 'navigate',
-            'sec-fetch-user': '?1',
-            'sec-fetch-dest': 'document',
-            'accept-language': 'zh-CN,zh',
+            'accept': 'application/json, text/plain, */*',
+            'accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+            'content-type': 'application/json',
             'platform': 'MINI_PROGRAM',
+            'channel': 'mypoint',
+            'origin': 'https://mcs-mimp-web.sf-express.com',
+            'x-requested-with': 'com.tencent.mm',
         }
 
         self.phone = ''
@@ -123,16 +129,15 @@ class RUN:
 
         self.getSign()
         try:
-            url = 'https://mcs-mimp-web.sf-express.com/mcs-mimp/commonPost/~memberNonactivity~integralTaskSignPlusService~automaticSignFetchPackage'
-            resp = self.s.post(url, headers=self.headers, json={"comeFrom": "vioin", "channelFrom": "WEIXIN"})
+            url = 'https://mcs-mimp-web.sf-express.com/mcs-mimp/commonPost/~memberNonactivity~integralSignV2Service~getTodaySign'
+            resp = self.s.post(url, headers=self.headers, json={})
             res = resp.json()
-            if res.get('success') == True or (
-                res.get('errorCode') and 'login' not in str(res.get('errorMessage', '')).lower()
-            ):
+            if res.get('success') == True:
+                day_count = res.get('obj', {}).get('dayCount', 0)
                 if self.phone:
-                    Log(f'✅ Cookie 有效，用户:【{self.mobile}】恢复会话成功')
+                    Log(f'✅ Cookie 有效，用户:【{self.mobile}】连续签到{day_count}天')
                 else:
-                    Log(f'✅ Cookie 有效，会话恢复成功')
+                    Log(f'✅ Cookie 有效，连续签到{day_count}天')
                 return True
             else:
                 error_msg = res.get('errorMessage', '未知错误')
@@ -158,32 +163,63 @@ class RUN:
         return cookies
 
     def _login_with_redirect(self):
-        """用 activityRedirect URL 重新登录"""
+        """用 redirect URL 或 linkCode 建立会话"""
         if not self.redirect_url:
-            Log('❌ 没有可用的 redirect URL，无法登录')
+            Log('❌ 无 redirect URL，无法重新登录（纯 cookie 模式需要重新抓包并设置 ONESIGN_SFSY_TOKEN）')
             return False
 
-        Log(f'用 redirect URL 重新登录...')
+        # 判断输入类型: linkCode 短码 vs 完整 URL
+        is_linkcode = not self.redirect_url.startswith('http')
+        if is_linkcode:
+            link_code = self.redirect_url.strip()
+            page_url = (
+                f'https://mcs-mimp-web.sf-express.com/up-member/newPoints'
+                f'?linkCode={link_code}&from=mypoint&supportShare=YES'
+            )
+            Log(f'[linkCode 模式] {link_code}')
+        else:
+            page_url = self.redirect_url
+            Log(f'[redirect URL 模式]')
+
+        Log(f'发起请求建立会话...')
         try:
-            ress = self.s.get(self.redirect_url, headers=self.headers, allow_redirects=True, timeout=15)
+            # 先不跟随重定向，捕获服务器返回的初始 cookie
+            ress = self.s.get(page_url, headers=self.headers, allow_redirects=False, timeout=15)
 
-            # 检查是否被重定向到登录页
-            if ress.status_code == 302 or 'login' in (ress.url or '').lower():
-                Log(f'❌ Redirect URL 已失效（OAuth code 已过期或已使用），请重新抓包')
-                Log(f'   小程序: 顺丰速运 → 我的 → 积分 → 抓 activityRedirect 请求')
-                return False
+            # 逐跳跟随重定向（手动跟随以捕获每一跳的 cookie）
+            redirect_count = 0
+            while ress.status_code in (301, 302, 303, 307, 308) and redirect_count < 5:
+                location = ress.headers.get('Location', '')
+                if not location:
+                    break
+                redirect_count += 1
+                Log(f'  第{redirect_count}跳: {location[:80]}...')
+                ress = self.s.get(location, headers=self.headers, allow_redirects=False, timeout=15)
 
-            self.user_id = self.s.cookies.get_dict().get('_login_user_id_', '')
-            self.phone = self.s.cookies.get_dict().get('_login_mobile_', '')
+            # 尝试提取用户 cookie
+            cookie_dict = self.s.cookies.get_dict()
+            self.user_id = cookie_dict.get('_login_user_id_', '')
+            self.phone = cookie_dict.get('_login_mobile_', '')
             self.mobile = self.phone[:3] + "*" * 4 + self.phone[7:] if len(self.phone) >= 11 else self.phone
+            jsessionid = cookie_dict.get('JSESSIONID', '')
 
             if self.phone:
                 Log(f'✅ 登录成功，用户:【{self.mobile}】')
                 return True
+
+            # 无用户认证信息
+            if is_linkcode:
+                Log(f'⚠️ linkCode 方式未获取到用户认证')
+                Log(f'   需要在微信中打开该小程序链接完成授权后，cookie 才能生效')
+                if jsessionid:
+                    Log(f'   当前获得 JSESSIONID={jsessionid[:16]}...（待授权）')
             else:
-                Log(f'❌ 登录失败：未能获取用户信息（redirect URL 可能已过期）')
-                Log(f'   请重新抓包获取新的 activityRedirect URL')
-                return False
+                if jsessionid:
+                    Log(f'❌ Redirect URL 已失效（session 存在但无用户信息，OAuth code 已过期）')
+                else:
+                    Log(f'❌ Redirect URL 已失效，未能建立会话')
+
+            return False
         except requests.RequestException as e:
             Log(f'❌ 登录请求失败: {e}')
             return False
@@ -222,38 +258,32 @@ class RUN:
 
     def sign(self):
         print(f'>>>>>>开始执行签到')
-        json_data = {"comeFrom": "vioin", "channelFrom": "WEIXIN"}
-        url = 'https://mcs-mimp-web.sf-express.com/mcs-mimp/commonPost/~memberNonactivity~integralTaskSignPlusService~automaticSignFetchPackage'
-        response = self.do_request(url, data=json_data)
+        # V2: 先查今日签到状态
+        url = 'https://mcs-mimp-web.sf-express.com/mcs-mimp/commonPost/~memberNonactivity~integralSignV2Service~getTodaySign'
+        response = self.do_request(url, data={})
         if response and response.get('success') == True:
-            count_day = response.get('obj', {}).get('countDay', 0)
-            if response.get('obj') and response['obj'].get('integralTaskSignPackageVOList'):
-                packet_name = response["obj"]["integralTaskSignPackageVOList"][0]["packetName"]
-                Log(f'>>>签到成功，获得【{packet_name}】，本周累计签到【{count_day + 1}】天')
+            obj = response.get('obj', {})
+            if obj.get('signed'):
+                day_count = obj.get('dayCount', 0)
+                bubble_text = obj.get('bubbleText', '')
+                Log(f'今日已签到，连续签到{day_count}天（{bubble_text}）')
             else:
-                Log(f'今日已签到，本周累计签到【{count_day + 1}】天')
+                # 未签到，执行签到
+                sign_url = 'https://mcs-mimp-web.sf-express.com/mcs-mimp/commonPost/~memberNonactivity~integralSignV2Service~signAwardPool'
+                sign_resp = self.do_request(sign_url, data={})
+                if sign_resp and sign_resp.get('success') == True:
+                    gifts = sign_resp.get('obj', [])
+                    if gifts:
+                        gift_names = ', '.join([g.get('giftBagName', '未知') for g in gifts])
+                        Log(f'签到成功！获得: {gift_names}')
+                    else:
+                        Log(f'签到成功！')
+                else:
+                    error_message = sign_resp.get('errorMessage') if sign_resp else '无返回'
+                    print(f'签到失败: {error_message}')
         else:
             error_message = response.get('errorMessage') if response else '无返回'
-            print(f'签到失败: {error_message}')
-
-    def superWelfare_receiveRedPacket(self):
-        print(f'>>>>>>超值福利签到')
-        json_data = {
-            'channel': 'czflqdlhbxcx'
-        }
-        url = 'https://mcs-mimp-web.sf-express.com/mcs-mimp/commonPost/~memberActLengthy~redPacketActivityService~superWelfare~receiveRedPacket'
-        response = self.do_request(url, data=json_data)
-        if response and response.get('success') == True:
-            gift_list = response.get('obj', {}).get('giftList', [])
-            if response.get('obj', {}).get('extraGiftList', []):
-                gift_list.extend(response['obj']['extraGiftList'])
-            gift_names = ', '.join([gift['giftName'] for gift in gift_list])
-            receive_status = response.get('obj', {}).get('receiveStatus')
-            status_message = '领取成功' if receive_status == 1 else '已领取过'
-            Log(f'超值福利签到[{status_message}]: {gift_names}')
-        else:
-            error_message = response.get('errorMessage') if response else '无返回'
-            print(f'超值福利签到失败: {error_message}')
+            print(f'签到状态查询失败: {error_message}')
 
     def get_SignTaskList(self, END=False):
         if not END:
@@ -327,7 +357,6 @@ class RUN:
             Log(f'   解决方法: 重新抓包获取 activityRedirect URL')
             return False
         self.sign()
-        self.superWelfare_receiveRedPacket()
         self.get_SignTaskList()
         self.get_SignTaskList(END=True)
         return True
@@ -335,16 +364,20 @@ class RUN:
 
 if __name__ == '__main__':
     token = os.environ.get('ONESIGN_SFSY_TOKEN', '')
-    if not token:
-        print("未配置 ONESIGN_SFSY_TOKEN 变量")
-        print("抓包获取: 小程序 → 我的 → 积分 → 找到 activityRedirect 请求 → 复制完整 URL")
-        print("首次运行必须抓包，之后 cookie 会自动持久化，过期前无需重新抓包。")
-        sys.exit(1)
-    tokens = token.split('#')
-    tokens = [t for t in tokens if t]
-    print(f"共获取到{len(tokens)}个账号")
-
     saved_cookies_list = load_cookies()
+
+    if not token:
+        if not saved_cookies_list:
+            print("未配置 ONESIGN_SFSY_TOKEN 变量，且无已保存的 cookie")
+            print("首次使用需抓包: 小程序 → 我的 → 积分 → 找到 activityRedirect 请求 → 复制完整 URL")
+            print("或手动将抓包中的 Cookie 写入 .sfsy_cookies.json")
+            sys.exit(1)
+        tokens = [''] * len(saved_cookies_list)
+        print(f"[Cookie模式] 共{len(tokens)}个账号（纯 cookie，无 redirect URL 回退）")
+    else:
+        tokens = token.split('#')
+        tokens = [t for t in tokens if t]
+        print(f"共获取到{len(tokens)}个账号")
 
     success = True
     all_cookies = []

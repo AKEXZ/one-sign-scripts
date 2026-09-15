@@ -28,7 +28,8 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 SCRIPT_NAME = "德邦快递"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CRM_TOKEN_FILE = os.path.join(SCRIPT_DIR, ".dbkd_crm_tokens.json")
+COOKIE_DIR = os.path.dirname(SCRIPT_DIR) if os.path.basename(SCRIPT_DIR) == 'scripts' else SCRIPT_DIR
+CRM_TOKEN_FILE = os.path.join(COOKIE_DIR, ".dbkd_crm_tokens.json")
 success = True
 
 

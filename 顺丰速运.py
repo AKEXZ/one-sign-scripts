@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 # -- coding: utf-8 --
 """
-抓包步骤（仅在 cookie 过期时需要）：
+抓包步骤（仅在 cookie 过期且 redirect URL 失效时）：
   打开顺丰速运小程序 → 我的 → 积分
   抓包筛选 activityRedirect
   复制完整 URL，设置到 ONESIGN_SFSY_TOKEN 变量中
@@ -9,8 +9,9 @@
 
 Cookie 持久化：
   首次登录成功后 cookie 会保存到同目录下的 .sfsy_cookies.json，
-  之后运行会优先使用已保存的 cookie，无需每天抓包。
-  仅当 cookie 过期时才需要重新抓包更新 ONESIGN_SFSY_TOKEN。
+  之后运行会优先使用已保存的 cookie。
+  当 cookie 过期时会尝试用 redirect URL 重新登录；
+  仅当 cookie 和 redirect URL 都失效时才需要重新抓包。
 """
 import hashlib
 import json
@@ -69,6 +70,7 @@ def save_cookies(all_cookies):
 class RUN:
     def __init__(self, info, index, saved_cookies=None):
         self.index = index + 1
+        self.redirect_url = info.strip()
         Log(f"\n---------开始执行第{self.index}个账号>>>>>")
         self.s = requests.session()
         self.s.verify = False
@@ -88,12 +90,12 @@ class RUN:
         self.phone = ''
         self.login_res = False
 
-        # 先尝试用已保存的 cookie 恢复会话
+        # 1) 优先尝试已保存的 cookie
         if saved_cookies and self._try_cookie_login(saved_cookies):
             self.login_res = True
         else:
-            # cookie 过期，用 redirect URL 重新登录
-            self.login_res = self.login(info)
+            # 2) cookie 过期，用 redirect URL 重新登录
+            self.login_res = self._login_with_redirect()
 
     def get_deviceId(self, characters='abcdef0123456789'):
         result = ''
@@ -108,42 +110,36 @@ class RUN:
 
     def _try_cookie_login(self, saved_cookies):
         """尝试用已保存的 cookie 恢复会话，返回 True 表示 cookie 有效。"""
-        # 将保存的 cookie 加载到 session
         for cookie in saved_cookies:
             self.s.cookies.set(cookie['name'], cookie['value'], domain=cookie.get('domain', ''))
+
+        # 从已保存的元数据恢复 phone
+        if saved_cookies:
+            self.user_id = saved_cookies[0].get('_login_user_id_', '')
+            self.phone = saved_cookies[0].get('_login_mobile_', '')
+        self.mobile = self.phone[:3] + "*" * 4 + self.phone[7:] if len(self.phone) >= 11 else self.phone
+
         Log(f'尝试使用已保存的 cookie 恢复会话...')
 
-        # 调一个轻量接口验证 cookie 是否有效
         self.getSign()
         try:
             url = 'https://mcs-mimp-web.sf-express.com/mcs-mimp/commonPost/~memberNonactivity~integralTaskSignPlusService~automaticSignFetchPackage'
             resp = self.s.post(url, headers=self.headers, json={"comeFrom": "vioin", "channelFrom": "WEIXIN"})
             res = resp.json()
-            if res.get('success') == True or (res.get('errorCode') and 'login' not in str(res.get('errorMessage', '')).lower()):
-                # 从 cookie 中提取用户信息
-                cookie_dict = self.s.cookies.get_dict()
-                self.user_id = cookie_dict.get('_login_user_id_', saved_cookies[0].get('_login_user_id_', ''))
-                self.phone = cookie_dict.get('_login_mobile_', saved_cookies[0].get('_login_mobile_', ''))
-                if not self.phone:
-                    # 从已保存的额外字段恢复
-                    for ck in saved_cookies:
-                        if ck.get('name') == '_login_mobile_':
-                            self.phone = ck.get('value', '')
-                            break
-                        elif ck.get('_login_mobile_'):
-                            self.phone = ck['_login_mobile_']
-                self.mobile = self.phone[:3] + "*" * 4 + self.phone[7:] if len(self.phone) >= 11 else self.phone
+            if res.get('success') == True or (
+                res.get('errorCode') and 'login' not in str(res.get('errorMessage', '')).lower()
+            ):
                 if self.phone:
-                    Log(f'Cookie 有效，用户:【{self.mobile}】恢复会话成功')
-                    return True
+                    Log(f'✅ Cookie 有效，用户:【{self.mobile}】恢复会话成功')
                 else:
-                    Log(f'Cookie 有效但无法获取手机号，仍视为恢复成功')
-                    return True
+                    Log(f'✅ Cookie 有效，会话恢复成功')
+                return True
             else:
-                Log(f'Cookie 已过期: {res.get("errorMessage", "未知错误")}')
+                error_msg = res.get('errorMessage', '未知错误')
+                Log(f'⚠️ Cookie 已过期 ({error_msg})')
                 return False
         except Exception as e:
-            Log(f'Cookie 验证失败: {e}')
+            Log(f'⚠️ Cookie 验证失败: {e}')
             return False
 
     def get_cookies_for_save(self):
@@ -156,22 +152,40 @@ class RUN:
                 'domain': cookie.domain,
                 'path': cookie.path,
             })
-        # 额外保存 user_id 和 phone 以便恢复时能显示用户名
         if cookies:
             cookies[0]['_login_user_id_'] = getattr(self, 'user_id', '')
             cookies[0]['_login_mobile_'] = getattr(self, 'phone', '')
         return cookies
 
-    def login(self, sfurl):
-        ress = self.s.get(sfurl, headers=self.headers)
-        self.user_id = self.s.cookies.get_dict().get('_login_user_id_', '')
-        self.phone = self.s.cookies.get_dict().get('_login_mobile_', '')
-        self.mobile = self.phone[:3] + "*" * 4 + self.phone[7:]
-        if self.phone != '':
-            Log(f'用户:【{self.mobile}】登陆成功')
-            return True
-        else:
-            Log(f'获取用户信息失败')
+    def _login_with_redirect(self):
+        """用 activityRedirect URL 重新登录"""
+        if not self.redirect_url:
+            Log('❌ 没有可用的 redirect URL，无法登录')
+            return False
+
+        Log(f'用 redirect URL 重新登录...')
+        try:
+            ress = self.s.get(self.redirect_url, headers=self.headers, allow_redirects=True, timeout=15)
+
+            # 检查是否被重定向到登录页
+            if ress.status_code == 302 or 'login' in (ress.url or '').lower():
+                Log(f'❌ Redirect URL 已失效（OAuth code 已过期或已使用），请重新抓包')
+                Log(f'   小程序: 顺丰速运 → 我的 → 积分 → 抓 activityRedirect 请求')
+                return False
+
+            self.user_id = self.s.cookies.get_dict().get('_login_user_id_', '')
+            self.phone = self.s.cookies.get_dict().get('_login_mobile_', '')
+            self.mobile = self.phone[:3] + "*" * 4 + self.phone[7:] if len(self.phone) >= 11 else self.phone
+
+            if self.phone:
+                Log(f'✅ 登录成功，用户:【{self.mobile}】')
+                return True
+            else:
+                Log(f'❌ 登录失败：未能获取用户信息（redirect URL 可能已过期）')
+                Log(f'   请重新抓包获取新的 activityRedirect URL')
+                return False
+        except requests.RequestException as e:
+            Log(f'❌ 登录请求失败: {e}')
             return False
 
     def getSign(self):
@@ -308,6 +322,9 @@ class RUN:
 
     def main(self):
         if not self.login_res:
+            Log(f'\n❌ 第{self.index}个账号登录失败，跳过')
+            Log(f'   可能原因: cookie 过期且 redirect URL 中的 OAuth code 已失效')
+            Log(f'   解决方法: 重新抓包获取 activityRedirect URL')
             return False
         self.sign()
         self.superWelfare_receiveRedPacket()
@@ -327,7 +344,6 @@ if __name__ == '__main__':
     tokens = [t for t in tokens if t]
     print(f"共获取到{len(tokens)}个账号")
 
-    # 加载已保存的 cookie
     saved_cookies_list = load_cookies()
 
     success = True
@@ -338,10 +354,8 @@ if __name__ == '__main__':
         run_result = runner.main()
         if not run_result:
             success = False
-        # 收集当前账号的 cookie 用于持久化
         all_cookies.append(runner.get_cookies_for_save())
 
-    # 保存所有账号的 cookie（即使部分失败也保存成功的）
     save_cookies(all_cookies)
 
     if not success:

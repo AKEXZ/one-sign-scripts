@@ -395,22 +395,30 @@ class RUN:
 
         # 2. 签到
         info = self.sign_info()
-        if info and info.get('isSign') == 0:
+        if info and int(info.get('isSign', 1)) != 1:
             self.sign()
         elif info:
             Log("今日已签到，跳过")
 
-        # 3. 点赞任务 (通过 API 可自动完成的任务)
+        # 3. 查询任务列表，判断哪些需要执行
         self._sleep()
-        self.do_like_task(count=5)
+        tasks = self.task_list()
 
-        # 4. 签到日历
+        # 4. 点赞任务 (仅在未完成时执行)
+        need_like = True
+        if tasks:
+            for t in tasks.get('dailyTasks', []):
+                if '点赞' in t.get('taskTitle', '') and t.get('receiveStatus') == 1:
+                    Log("点赞任务已完成，跳过")
+                    need_like = False
+                    break
+        if need_like:
+            self._sleep()
+            self.do_like_task(count=5)
+
+        # 5. 签到日历
         self._sleep()
         self.sign_calendar()
-
-        # 5. 任务列表总结
-        self._sleep()
-        self.task_list()
 
         # 6. 领取积分 (所有任务执行后统一领取)
         self._sleep()

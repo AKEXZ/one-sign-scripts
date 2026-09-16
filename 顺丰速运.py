@@ -21,6 +21,7 @@ import random
 import time
 import sys
 import requests
+from urllib.parse import urlparse, quote, urlunparse
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
@@ -162,6 +163,21 @@ class RUN:
             cookies[0]['_login_mobile_'] = getattr(self, 'phone', '')
         return cookies
 
+    def _fix_url_encoding(self, url):
+        """修复 URL query string 中的 + / = 等字符编码"""
+        parsed = urlparse(url)
+        if not parsed.query:
+            return url
+        pairs = []
+        for pair in parsed.query.split('&'):
+            if '=' in pair:
+                k, v = pair.split('=', 1)
+                v = quote(v, safe='%')
+                pairs.append(f'{k}={v}')
+            else:
+                pairs.append(pair)
+        return urlunparse(parsed._replace(query='&'.join(pairs)))
+
     def _login_with_redirect(self):
         """用 redirect URL 或 linkCode 建立会话"""
         if not self.redirect_url:
@@ -180,6 +196,10 @@ class RUN:
         else:
             page_url = self.redirect_url
             Log(f'[redirect URL 模式]')
+
+        # 修复 URL 编码：抓包工具可能不编码 + / = 等字符，
+        # 但 requests 库会把 + 当空格发送，导致 base64 参数校验失败
+        page_url = self._fix_url_encoding(page_url)
 
         Log(f'发起请求建立会话...')
         try:

@@ -201,5 +201,5 @@ if __name__ == '__main__':
     for idx, info in enumerate(tokens):
         IQiYi(info, idx).main()
     if not success:
-        notify_failure(SCRIPT_NAME, success)
+        print(f'【{SCRIPT_NAME}】：签到失败')
         sys.exit(1)

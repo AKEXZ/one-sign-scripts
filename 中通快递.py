@@ -55,11 +55,20 @@ class RUN:
             'x-oid': self.oid,
             'x-sv-v': '0.22.0',
             'x-token': self.token,
-            'x-version': 'V8.160.1',
+            'x-version': 'V8.163.5',
+            'x-ys-dt': self._gen_ys_dt(),
             'charset': 'utf-8',
-            'Referer': 'https://servicewechat.com/wx7ddec43d9d27276a/693/page-frame.html',
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 15; RMX5062 Build/UKQ1.231108.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.181 Mobile Safari/537.36 XWEB/1500047 MMWEBSDK/20260502 MMWEBID/784 MicroMessenger/8.0.76.3141(0x28004C50) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64 MiniProgramEnv/android',
+            'Referer': 'https://servicewechat.com/wx7ddec43d9d27276a/705/page-frame.html',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 15; RMX5062 Build/UKQ1.231108.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.189 Mobile Safari/537.36 XWEB/1500135 MMWEBSDK/20260502 MMWEBID/784 MicroMessenger/8.0.76.3141(0x28004C54) WeChat/arm64 Weixin NetType/VPN:com.network.proxy Language/zh_CN ABI/arm64 MiniProgramEnv/android',
         }
+
+    def _gen_ys_dt(self):
+        import uuid
+        import random
+        import string
+        uid = uuid.uuid4().hex
+        rand = ''.join(random.choices(string.ascii_letters + string.digits + '+/', k=22))
+        return f'{uid}_{rand}'
 
     def do_post(self, path, data=None):
         try:
@@ -162,5 +171,5 @@ if __name__ == '__main__':
     for idx, info in enumerate(tokens):
         RUN(info, idx).main()
     if not success:
-        notify_failure(SCRIPT_NAME, success)
+        print(f'【{SCRIPT_NAME}】：签到失败')
         sys.exit(1)

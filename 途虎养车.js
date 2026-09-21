@@ -3,7 +3,7 @@
  * 变量：ONESIGN_TUHU_TOKEN（token）
  *       多账号用 @ 分隔
  *
- * cron: 12 8 * * *
+ * cron: 5 8 * * *
  * new Env('途虎养车签到');
  */
 
@@ -57,6 +57,11 @@ function hideMobile(mobile) {
 async function tuhu() {
     let success = true;
     console.log("【途虎养车】：开始签到...");
+
+    // 随机延迟 1~30 分钟
+    const __delay = Math.floor(Math.random() * 1740) + 60;
+    console.log(`【途虎养车】随机延迟 ${Math.round(__delay / 60)} 分钟`);
+    await new Promise(r => setTimeout(r, __delay * 1000));
 
     const tokenStr = getConfig("", "ONESIGN_TUHU_TOKEN") || '';
     const tokenArr = tokenStr.split('@').filter(t => t.trim());

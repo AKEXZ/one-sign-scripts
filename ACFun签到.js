@@ -2,7 +2,7 @@
  * 抓包：ACFun app → 登录 → 抓包获取 cookie
  * 变量：ONESIGN_ACFUN_COOKIE（cookie 值，多账号用 @ 或换行分隔）
  *
- * cron: 0 9 * * *
+ * cron: 40 8 * * *
  * new Env('ACFun签到');
  */
 
@@ -45,6 +45,11 @@ async function acfunPost(url, data, headers) {
 async function acfun() {
     let success = true;
     console.log("【ACFun】：开始签到...");
+
+    // 随机延迟 1~30 分钟
+    const __delay = Math.floor(Math.random() * 1740) + 60;
+    console.log(`【ACFun】随机延迟 ${Math.round(__delay / 60)} 分钟`);
+    await new Promise(r => setTimeout(r, __delay * 1000));
 
     const cookie = getConfig("", "ONESIGN_ACFUN_COOKIE");
     if (!cookie) {

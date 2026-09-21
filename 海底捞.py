@@ -5,7 +5,7 @@
       复制 _HAIDILAO_APP_TOKEN 的值，格式：TOKEN_APP_xxx
 变量：ONESIGN_HDL_TOKEN（_HAIDILAO_APP_TOKEN，多账号用 # 或 & 分隔）
 
-cron: 0 6 * * *
+cron: 3 6 * * *
 new Env('海底捞小程序签到')
 """
 import os
@@ -14,6 +14,12 @@ import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+# 随机延迟 1~30 分钟
+import random
+_delay = random.randint(60, 1800)
+print(f"【海底捞】随机延迟 {_delay // 60} 分 {_delay % 60} 秒")
+time.sleep(_delay)
 
 SCRIPT_NAME = "海底捞"
 success = True

@@ -6,7 +6,7 @@
       需包含 P00001、P00003、QC005、__dfp 字段
 变量：ONESIGN_IQY_COOKIE（完整 cookie 值，多账号用 # 或 & 分隔）
 
-cron: 25 6,12,18 * * *
+cron: 12 6,12,18 * * *
 new Env('爱奇艺签到')
 """
 import os
@@ -28,6 +28,12 @@ except ImportError:
     sys.exit(1)
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+# 随机延迟 1~30 分钟
+import random
+_delay = random.randint(60, 1800)
+print(f"【爱奇艺】随机延迟 {_delay // 60} 分 {_delay % 60} 秒")
+time.sleep(_delay)
 
 SCRIPT_NAME = "爱奇艺"
 success = True

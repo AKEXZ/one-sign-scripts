@@ -2,7 +2,7 @@
  * 抓包：捷停车小程序 我的 → 停车币 → 抓包获取 userId 和 token
  * 变量：ONESIGN_JTC_TOKEN（格式：userId,token，多账号用 @ 或换行分隔）
  *
- * cron: 15 9 * * *
+ * cron: 5 9 * * *
  * new Env('捷停车签到');
  */
 
@@ -45,6 +45,11 @@ async function httpRequest(options) {
 async function jtc() {
     let success = true;
     console.log("【捷停车】：开始签到...");
+
+    // 随机延迟 1~30 分钟
+    const __delay = Math.floor(Math.random() * 1740) + 60;
+    console.log(`【捷停车】随机延迟 ${Math.round(__delay / 60)} 分钟`);
+    await new Promise(r => setTimeout(r, __delay * 1000));
 
     const token = getConfig("", "ONESIGN_JTC_TOKEN");
     if (!token) {

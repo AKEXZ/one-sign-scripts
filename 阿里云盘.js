@@ -5,7 +5,7 @@
       找 token 对象中的 refresh_token
 变量：ONESIGN_ALIYUN_REFRESH_TOKEN
 
-cron: 30 8 * * *
+cron: 25 8 * * *
 new Env('阿里云盘签到');
 */
 
@@ -89,6 +89,12 @@ async function sign(token, name) {
 
 async function aliyun() {
     let success = true;
+
+    // 随机延迟 1~30 分钟
+    const __delay = Math.floor(Math.random() * 1740) + 60;
+    console.log(`【阿里云盘】随机延迟 ${Math.round(__delay / 60)} 分钟`);
+    await new Promise(r => setTimeout(r, __delay * 1000));
+
     const auth = await getAccessToken();
     if (!auth) {
         console.log("【阿里云盘】：token刷新失败");

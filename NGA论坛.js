@@ -4,7 +4,7 @@
       Request Headers 中的 User-Agent 复制整段
 变量：ONESIGN_NGA_UID / ONESIGN_NGA_ACCESSTOKEN / ONESIGN_NGA_UA
 
-cron: 20 8 * * *
+cron: 15 8 * * *
 new Env('NGA论坛签到');
 */
 
@@ -63,6 +63,12 @@ function ngaGet(lib, act, output = 11, other = null) {
 async function task() {
     let success = true;
     console.log("【NGA】：开始签到...");
+
+    // 随机延迟 1~30 分钟
+    const __delay = Math.floor(Math.random() * 1740) + 60;
+    console.log(`【NGA】随机延迟 ${Math.round(__delay / 60)} 分钟`);
+    await new Promise(r => setTimeout(r, __delay * 1000));
+
     const res1 = await ngaGet("check_in", "check_in");
     if (res1 && res1.data) {
         console.log("签到：" + res1.data[0]);

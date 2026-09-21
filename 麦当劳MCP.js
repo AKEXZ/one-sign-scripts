@@ -3,7 +3,7 @@
       找到 Request Headers 中的 Authorization 字段（Bearer xxx），复制整段
 变量：ONESIGN_MCDONALD_TOKEN
 
-cron: 0 9 * * *
+cron: 50 8 * * *
 new Env('麦当劳领券');
 */
 
@@ -144,6 +144,11 @@ async function getCampaignCalendar(specifiedDate = null) {
 async function mcdonald() {
     let success = true;
     console.log("【麦当劳】：开始领券...");
+
+    // 随机延迟 1~30 分钟
+    const __delay = Math.floor(Math.random() * 1740) + 60;
+    console.log(`【麦当劳】随机延迟 ${Math.round(__delay / 60)} 分钟`);
+    await new Promise(r => setTimeout(r, __delay * 1000));
 
     try {
         // 0. 列出所有可用 MCP 工具

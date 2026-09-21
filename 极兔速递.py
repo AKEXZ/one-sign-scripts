@@ -5,7 +5,7 @@
       复制 authtoken 参数值
 变量：ONESIGN_JTSD_TOKEN（authtoken 值，多账号用 # 或 & 分隔）
 
-cron: 0 6 * * *
+cron: 6 6 * * *
 new Env('极兔速递小程序签到')
 """
 import os
@@ -15,6 +15,12 @@ import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+# 随机延迟 1~30 分钟
+import random
+_delay = random.randint(60, 1800)
+print(f"【极兔速递】随机延迟 {_delay // 60} 分 {_delay % 60} 秒")
+time.sleep(_delay)
 
 SCRIPT_NAME = "极兔速递"
 success = True

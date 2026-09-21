@@ -6,10 +6,11 @@
       可选变量 ONESIGN_VMTDD_LOCATION（经纬度，格式 "lat,lon"，用于获取推荐打卡点列表，默认洛阳）
       可选变量 ONESIGN_VMTDD_REGION（城市名，用于获取推荐打卡点，默认洛阳市）
 
-cron: 0 8 * * *
+cron: 10 7 * * *
 new Env('维迈通多多签到');
 """
 import json
+import math
 import os
 import sys
 import time
@@ -20,6 +21,11 @@ import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+# 随机延迟 1~30 分钟
+_delay = random.randint(60, 1800)
+print(f"【维迈通多多】随机延迟 {_delay // 60} 分 {_delay % 60} 秒")
+time.sleep(_delay)
 
 SCRIPT_NAME = "维迈通多多"
 BASE_URL = "https://eco.trantor.top"
@@ -271,42 +277,105 @@ class RUN:
 
     # ---- 骑行模拟 ----
 
-    def _generate_trajectory(self, start_lat, start_lon, distance_m=1200, points_count=60):
-        lat_per_km = 1.0 / 111000.0
-        lon_per_km = 1.0 / (111000.0 * 0.848)
-        total_dist = distance_m / 1000.0
-        lat_step = total_dist * lat_per_km / points_count
-        lon_step = total_dist * lon_per_km / points_count
+    def _generate_trajectory(self, start_lat, start_lon, distance_m=1500, points_per_km=150, time_offset_s=0):
+        # 平均速度 8 m/s (~29 km/h)，每点时间间隔
+        avg_speed_mps = 8.0
 
-        now_ms = int(time.time() * 1000)
+        # 使用正弦曲线模拟真实山路的海拔变化
+        alt_base = random.uniform(50, 400)
+        alt_amplitude = random.uniform(30, 200)
+        alt_phase = random.uniform(0, math.pi * 2)
+        alt_freq = random.uniform(1.5, 3.5)
+
+        # 随机初始方向 (度)
+        bearing = random.uniform(0, 360)
+        bearing_rad = math.radians(bearing)
+
+        # 每米对应的经纬度增量
+        lat_per_m = 1.0 / 111320.0
+        lon_per_m = 1.0 / (111320.0 * math.cos(math.radians(start_lat)))
+
+        points_count = max(60, int(distance_m / 1000.0 * points_per_km))
+        step_m = distance_m / points_count
+        step_time_ms = int(step_m / avg_speed_mps * 1000)  # 每点时间间隔(ms)
+
+        base_ms = int(time.time() * 1000) - time_offset_s * 1000
         points = []
+
+        current_lat = start_lat
+        current_lon = start_lon
+        prev_speed = random.uniform(5, 20)
+
         for i in range(points_count):
-            lat = round(start_lat + lat_step * i, 6)
-            lon = round(start_lon + lon_step * i, 6)
-            alt = round(250.0 + random.uniform(-5, 5), 1)
-            speed = round(random.uniform(8, 35), 3)
-            ts = now_ms - (points_count - i) * 2000
-            points.append(f"{lat},{lon},{alt},0.0,{speed},{ts}")
-        return ';'.join(points), now_ms
+            progress = i / points_count
 
-    def _upload_trajectory(self, group_id, user_id, pos_content, upload_time_ms):
-        filename = f"{group_id}_{user_id}_{upload_time_ms}_1.5.27.11.pos"
+            # 方向：在初始方向上叠加平滑的正弦偏移，形成弯曲路径
+            turn_amount = math.sin(progress * math.pi * random.uniform(1.5, 3.0)) * random.uniform(20, 50)
+            turn_amount += random.uniform(-3, 3)  # 小幅随机抖动
+            cur_bearing = bearing_rad + math.radians(turn_amount)
 
-        weather_str = json.dumps({
-            f"{filename}": [{"1": "1"}]
-        })
-        through_city_str = json.dumps({
-            f"{filename}": [{"1": self.region_name}]
-        })
+            lat_offset = step_m * lat_per_m * math.cos(cur_bearing)
+            lon_offset = step_m * lon_per_m * math.sin(cur_bearing)
 
-        files = {
-            'file': (filename, pos_content.encode('utf-8'), 'application/octet-stream'),
-        }
+            current_lat += lat_offset
+            current_lon += lon_offset
+
+            # 海拔：正弦曲线 + 随机噪声，限制在 9~500
+            raw_alt = alt_base + alt_amplitude * math.sin(progress * math.pi * alt_freq + alt_phase)
+            alt_noise = random.uniform(-8, 8)
+            alt = round(raw_alt + alt_noise, 1)
+            alt = max(9.0, min(500.0, alt))
+
+            # 速度：模拟真实骑行 (0~98 km/h)
+            if progress < 0.05:
+                # 起步加速
+                target_speed = random.uniform(0, 15)
+            elif progress > 0.9:
+                # 减速停车
+                target_speed = random.uniform(0, 10)
+            elif random.random() < 0.03:
+                # 偶然急刹车/等红灯
+                target_speed = random.uniform(0, 3)
+            elif random.random() < 0.08:
+                # 偶有加速冲刺
+                target_speed = random.uniform(55, 95)
+            elif random.random() < 0.1:
+                # 低速行驶
+                target_speed = random.uniform(5, 20)
+            else:
+                # 正常巡航
+                target_speed = random.uniform(18, 50)
+
+            # 平滑速度过渡
+            speed = round(prev_speed + (target_speed - prev_speed) * random.uniform(0.3, 0.7), 3)
+            speed = max(0.0, min(98.0, speed))
+            prev_speed = speed
+
+            ts = base_ms - (points_count - i) * step_time_ms
+
+            points.append(f"{round(current_lat, 6)},{round(current_lon, 6)},{alt},0.0,{speed},{ts}")
+
+        return ';'.join(points), base_ms, points_count
+
+    def _upload_trajectory_batch(self, user_id, pos_items, upload_time_ms):
+        """一次上传多个 .pos 轨迹文件 (匹配真实 App 行为)"""
+        # pos_items: [(group_id, pos_content, ride_time_ms), ...]
+
+        files = []
+        weather_data = {}
+        through_city_data = {}
+
+        for group_id, pos_content, ride_time_ms in pos_items:
+            filename = f"{group_id}_{user_id}_{ride_time_ms}_1.5.27.11.pos"
+            files.append(('file', (filename, pos_content.encode('utf-8'), 'application/octet-stream')))
+            weather_data[filename] = [{"1": "1"}]
+            through_city_data[filename] = [{"1": self.region_name}]
+
         data = {
             'token': self.token,
             'time': str(upload_time_ms),
-            'weather': weather_str,
-            'throughCity': through_city_str,
+            'weather': json.dumps(weather_data),
+            'throughCity': json.dumps(through_city_data),
         }
 
         try:
@@ -323,7 +392,7 @@ class RUN:
 
     def simulate_riding(self):
         global success
-        Log("模拟骑行 1km...")
+        Log("模拟单人骑行...")
 
         lat_parts = self.location.split(',')
         try:
@@ -349,14 +418,156 @@ class RUN:
 
         self._sleep()
 
-        # 2. 生成轨迹并上传
-        Log("  生成轨迹数据...")
-        pos_content, upload_time_ms = self._generate_trajectory(lat, lon)
-        group_id = abs(int(time.time() * 1000000) % 9999999999)  # 随机 session id
+        # 2. 生成 2 段轨迹 (模拟两次骑行，匹配真实 App 行为)
         user_id = self.user_id or '2960774'
 
-        Log(f"  上传轨迹 (group_id={group_id}, 约1.2km)...")
-        upload_result = self._upload_trajectory(group_id, user_id, pos_content, upload_time_ms)
+        avg_speed_mps = 8.0
+
+        pos_items = []
+        total_points = 0
+        total_distance = 0
+        for i in range(2):
+            distance = random.randint(1500, 5000)
+            # 估算骑行时长，用于计算合理的时间偏移
+            estimated_duration_s = int(distance / avg_speed_mps)
+            # 两段之间间隔 1~3 分钟
+            gap_s = random.randint(60, 180)
+            time_offset_s = (2 - i) * (estimated_duration_s + gap_s)
+
+            pos_content, ride_time_ms, pts_count = self._generate_trajectory(
+                lat, lon, distance_m=distance, time_offset_s=time_offset_s
+            )
+            group_id = random.randint(1000000000, 9999999999)
+            pos_items.append((group_id, pos_content, ride_time_ms))
+            total_points += pts_count
+            total_distance += distance
+
+            Log(f"  第{i + 1}段: {distance}m, {pts_count}点, 约{estimated_duration_s // 60}分{estimated_duration_s % 60}秒, group_id={group_id}")
+            if i == 0:
+                self._sleep()
+
+        upload_time_ms = int(time.time() * 1000)
+        Log(f"  上传 {len(pos_items)} 段轨迹 (共{total_distance}m, {total_points}点) ...")
+        upload_result = self._upload_trajectory_batch(user_id, pos_items, upload_time_ms)
+        if upload_result and upload_result.get('code') == 200:
+            Log("  轨迹上传成功！")
+            return True
+        else:
+            Log(f"  轨迹上传失败: {upload_result}")
+            success = False
+            return False
+
+    # ---- 群组对讲 ----
+
+    def _upload_group_trajectory(self, user_id, pos_content, ride_time_ms, upload_time_ms):
+        """群组对讲专用上传 (1个文件, timestamp格式weather/throughCity, 尾部终止标记)"""
+        filename = f"{random.randint(1000000000, 9999999999)}_{user_id}_{ride_time_ms}_1.5.27.11.pos"
+
+        # 群组对讲格式: timestamp:value 而不是 1:value
+        weather_ts = str(ride_time_ms // 1000)
+        temperature = str(random.randint(15, 35))
+        weather_data = {filename: [{weather_ts: temperature}]}
+        through_city_data = {filename: [{weather_ts: self.region_name}]}
+
+        # 轨迹尾部追加终止标记 0,0,0,0,0,ending_ts
+        ending_content = pos_content + f";0,0,0,0,0,{upload_time_ms}"
+
+        files = [
+            ('file', (filename, ending_content.encode('utf-8'), 'application/octet-stream')),
+        ]
+        data = {
+            'token': self.token,
+            'time': str(upload_time_ms),
+            'weather': json.dumps(weather_data),
+            'throughCity': json.dumps(through_city_data),
+        }
+
+        try:
+            resp = requests.post(
+                'https://data.trantor.top/uploadLocationFile/trajectory',
+                data=data,
+                files=files,
+                timeout=30,
+            )
+            return resp.json()
+        except Exception as e:
+            Log(f"  轨迹上传异常: {e}")
+            return None
+
+    def simulate_group_intercom(self):
+        global success
+        Log("模拟群组对讲...")
+
+        lat_parts = self.location.split(',')
+        try:
+            lat = float(lat_parts[0].strip())
+            lon = float(lat_parts[1].strip())
+        except (ValueError, IndexError):
+            Log("  位置解析失败，使用默认坐标")
+            lat, lon = 34.1509, 112.4730
+
+        user_id = self.user_id or '2960774'
+
+        # 1. 打卡记录上报
+        Log("  上报打卡记录...")
+        try:
+            punch_ids = self._get_recommend_punchpoints(need_count=2)
+        except Exception:
+            punch_ids = []
+        if len(punch_ids) >= 2:
+            punch_param = f"punchIds=%5B{punch_ids[0]}%2C{punch_ids[1]}%5D"
+            punch_result = self._post('/ecosystem/punchrecord/add', data=punch_param)
+            if punch_result and punch_result.get('code') == 0:
+                Log(f"  打卡记录上报成功 (punchIds=[{punch_ids[0]},{punch_ids[1]}])")
+            else:
+                Log(f"  打卡记录上报: {punch_result}")
+        else:
+            Log("  跳过打卡记录 (无可用打卡点)")
+
+        # 2. 骑行数据
+        Log("  查询骑行数据...")
+        riding_data = self._post('/ecosystem/trajectoryData/ridingData', data='white=2')
+        if riding_data and riding_data.get('code') == 0:
+            brand = riding_data['data'].get('brandName', '未知')
+            bike = riding_data['data'].get('cyclingName', '未知')
+            Log(f"  骑行数据: {brand} {bike}")
+        else:
+            Log(f"  骑行数据查询: {riding_data}")
+
+        # 3. 打卡点信息
+        point_info = self._post('/ecosystem/punchpoint/myInfo')
+        if point_info and point_info.get('code') == 0:
+            Log(f"  打卡信息 - 收藏:{point_info['data']['collectTotal']} 打卡:{point_info['data']['pointTotal']} 点赞:{point_info['data']['likeTotal']}")
+
+        # 4. 上报设备连接
+        self._sleep()
+        Log("  上报设备连接...")
+        device_result = self._post('/ecosystem/deviceConnect/report', data={
+            'province': '河南省',
+            'city': self.region_name,
+            'location': self.location,
+            'deviceModel': 'SOAIY GD36',
+            'macAddress': '41:42:F8:68:33:6B',
+        })
+        if device_result and device_result.get('code') == 0:
+            Log("  设备连接上报成功")
+        else:
+            Log(f"  设备连接上报失败: {device_result}")
+
+        self._sleep()
+
+        # 5. 生成并上传轨迹 (群组对讲格式: 1个文件，时间戳设 1~8 小时前)
+        distance = random.randint(1500, 5000)
+        estimated_duration_s = int(distance / 8.0)
+        # 群组对讲的时间戳比单人骑行更早，随机 1~8 小时前 (不会让脚本等 8 小时)
+        time_offset_s = random.randint(3600, 28800)
+        pos_content, ride_time_ms, pts_count = self._generate_trajectory(
+            lat, lon, distance_m=distance, time_offset_s=time_offset_s
+        )
+        Log(f"  轨迹: {distance}m, {pts_count}点, 约{estimated_duration_s // 60}分{estimated_duration_s % 60}秒 (时间偏移 {time_offset_s // 3600}h{time_offset_s % 3600 // 60}m前)")
+
+        upload_time_ms = int(time.time() * 1000)
+        upload_result = self._upload_group_trajectory(user_id, pos_content, ride_time_ms, upload_time_ms)
         if upload_result and upload_result.get('code') == 200:
             Log("  轨迹上传成功！")
             return True
@@ -404,27 +615,51 @@ class RUN:
         self._sleep()
         tasks = self.task_list()
 
-        # 4. 点赞任务 (仅在未完成时执行)
+        # 4. 检测各任务状态
         need_like = True
+        # need_group = True  # 群组对讲暂不可用 (需要群内成员/对讲数据)
+        need_ride = True
         if tasks:
             for t in tasks.get('dailyTasks', []):
-                if '点赞' in t.get('taskTitle', '') and t.get('receiveStatus') == 1:
-                    Log("点赞任务已完成，跳过")
-                    need_like = False
-                    break
+                title = t.get('taskTitle', '')
+                if t.get('receiveStatus') == 1:
+                    if '点赞' in title:
+                        Log("点赞任务已完成，跳过")
+                        need_like = False
+                    # if '群组对讲' in title:
+                    #     Log("群组对讲任务已完成，跳过")
+                    #     need_group = False
+                    if '单人骑行' in title:
+                        Log("单人骑行任务已完成，跳过")
+                        need_ride = False
+
+        # 5. 群组对讲 (暂不可用: 需要群内成员/对讲数据)
+        # if need_group:
+        #     self._sleep()
+        #     self.simulate_group_intercom()
+
+        # 6. 点赞任务
         if need_like:
             self._sleep()
             self.do_like_task(count=5)
 
-        # 5. 签到日历
+        # 7. 单人骑行
+        if need_ride:
+            self._sleep()
+            self.simulate_riding()
+            # 轨迹上传后等待服务器异步处理完成
+            Log("  等待服务器处理轨迹数据...")
+            time.sleep(5)
+
+        # 8. 签到日历
         self._sleep()
         self.sign_calendar()
 
-        # 6. 领取积分 (所有任务执行后统一领取)
+        # 9. 领取积分 (所有任务执行后统一领取)
         self._sleep()
         self.receive_integral()
 
-        # 7. 最终积分
+        # 10. 最终积分
         self.my_points(end=True)
 
         return True

@@ -24,6 +24,12 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
+# 随机延迟 1~30 分钟
+import random
+_delay = random.randint(60, 1800)
+print(f"【幸运咖】随机延迟 {_delay // 60} 分 {_delay % 60} 秒")
+time.sleep(_delay)
+
 BASE_URL = "https://xyk.mxbc.net"
 APP_ID = "fae0d199f50c8c88a742809706dbbbe6"
 

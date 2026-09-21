@@ -3,7 +3,7 @@
       找到 Request Headers 中的 Authorization 字段，整段复制
 变量：ONESIGN_CG163_AUTHORIZATION
 
-cron: 30 8 * * *
+cron: 20 8 * * *
 new Env('网易云游戏签到');
 */
 
@@ -76,6 +76,12 @@ function sign() {
 async function cg163() {
     let success = true;
     console.log("【网易云游戏】：开始签到...");
+
+    // 随机延迟 1~30 分钟
+    const __delay = Math.floor(Math.random() * 1740) + 60;
+    console.log(`【网易云游戏】随机延迟 ${Math.round(__delay / 60)} 分钟`);
+    await new Promise(r => setTimeout(r, __delay * 1000));
+
     const ckstatus = await check();
     if (ckstatus === 1) {
         const msg = await sign();

@@ -26,6 +26,12 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
+# 随机延迟 1~30 分钟
+import random
+_delay = random.randint(60, 1800)
+print(f"【德邦快递】随机延迟 {_delay // 60} 分 {_delay % 60} 秒")
+time.sleep(_delay)
+
 SCRIPT_NAME = "德邦快递"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 COOKIE_DIR = os.path.dirname(SCRIPT_DIR) if os.path.basename(SCRIPT_DIR) == 'scripts' else SCRIPT_DIR
@@ -252,17 +258,19 @@ class RUN:
             return True
 
         # 2) CRM token 不可用，走完整 ECO_TOKEN 流程
-        if self.queryUserInfo():
-            self.generate_tmp_token()
-            self.getSvipNewestInfo()
-            self.signIn_info()
-            self.getSvipNewestInfo()
-            return True
-        else:
+        if not self.queryUserInfo():
             success = False
-            print("❌ ECO_TOKEN 已过期，请重新抓包获取新的 ECO_TOKEN")
+            print("ECO_TOKEN 已过期或无效，请重新抓包获取新的 ECO_TOKEN")
             print("   小程序: 德邦快递 → 授权登录 → 复制 Cookie 中的 ECO_TOKEN 值")
             return False
+        if not self.generate_tmp_token():
+            success = False
+            print("临时 token 获取失败，请重新抓包获取新的 ECO_TOKEN")
+            return False
+        self.getSvipNewestInfo()
+        self.signIn_info()
+        self.getSvipNewestInfo()
+        return True
 
 
 if __name__ == '__main__':

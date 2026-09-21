@@ -2,7 +2,7 @@
  * 抓包：奇瑞汽车 app → 我的 → 签到 → 抓包获取 Authorization 值（去掉 Bearer 前缀）
  * 变量：ONESIGN_CHERY_TOKEN（Authorization 值，多账号用 @ 或换行分隔）
  *
- * cron: 9 7 * * *
+ * cron: 0 7 * * *
  * new Env('奇瑞汽车签到');
  */
 
@@ -47,6 +47,11 @@ async function httpRequest(options) {
 async function chery() {
     let success = true;
     console.log("【奇瑞汽车】：开始签到...");
+
+    // 随机延迟 1~30 分钟
+    const __delay = Math.floor(Math.random() * 1740) + 60;
+    console.log(`【奇瑞汽车】随机延迟 ${Math.round(__delay / 60)} 分钟`);
+    await new Promise(r => setTimeout(r, __delay * 1000));
 
     const token = getConfig("", "ONESIGN_CHERY_TOKEN");
     if (!token) {

@@ -247,6 +247,12 @@ async function processTasks() {
 async function unicom() {
     let success = true;
     console.log("【中国联通】：开始签到...");
+
+    // 随机延迟 1~30 分钟
+    const __delay = Math.floor(Math.random() * 1740) + 60;
+    console.log(`【中国联通】随机延迟 ${Math.round(__delay / 60)} 分钟`);
+    await new Promise(r => setTimeout(r, __delay * 1000));
+
     const loginOk = await onlineLogin();
     if (!loginOk) {
         console.log("【中国联通】：登录失败，请检查cookie");

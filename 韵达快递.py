@@ -5,7 +5,7 @@
       复制里面的 Authorization 参数值
 变量：ONESIGN_YDKD_TOKEN（Authorization 值，多账号用 # 或 & 分隔）
 
-cron: 0 6 * * *
+cron: 9 6 * * *
 new Env('韵达快递小程序签到')
 """
 import os
@@ -15,6 +15,12 @@ import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+# 随机延迟 1~30 分钟
+import random
+_delay = random.randint(60, 1800)
+print(f"【韵达快递】随机延迟 {_delay // 60} 分 {_delay % 60} 秒")
+time.sleep(_delay)
 
 SCRIPT_NAME = "韵达快递"
 success = True
@@ -74,37 +80,49 @@ class RUN:
             print(f'签到: {response.get("message", "") if response else "无响应"}')
 
     def get_TaskList(self):
+        global success
         print('>>>>>>获取任务列表')
         json_data = {"channelId": "wxapp", "pageNum": 1, "pageSize": 100, "businessType": "goldBetter",
                      "reqTime": int(time.time()), "accountSrc": "wxapp", "accountId": self.token}
         response = self.do_request(f'{self.baseUrl}integral/event/list', json_data)
-        if response and response.get('message') == '请求成功':
-            data = response.get('data', {})
-            items = data.get('items', [])
-            skip_types = ['关注公众号', '实名认证', '完善个人信息', '累计消耗积分', '寄快递', '购买超级会员', '兑换商品']
-            all_done = True
-            for item in items:
-                eventStatus = item.get('eventStatus', '0')
-                eventCode = item.get('eventCode', '')
-                surplusCount = item.get('surplusCount', 0)
-                title = item.get('eventName', '')
-                if title in skip_types:
-                    continue
-                if title == '本月寄满3件':
-                    surplusCount = 1
-                stu = {"0": "已完成", "1": "未完成"}
-                print(f'当前任务【{title}】,{stu.get(eventStatus, "未知")}')
-                for _ in range(surplusCount):
-                    if eventStatus == "1":
-                        self.doTask(eventCode, title)
-                        if title == '观看精彩视频':
-                            self.watchAd(title)
-                    time.sleep(1)
+        if not response or response.get('message') != '请求成功':
+            print(f'获取任务列表失败: {response.get("message", "无响应") if response else "无响应"}')
+            success = False
+            return False
+        data = response.get('data', {})
+        items = data.get('items', [])
+        if not items:
+            print('任务列表为空，token 可能已失效')
+            success = False
+            return False
+        skip_types = ['关注公众号', '实名认证', '完善个人信息', '累计消耗积分', '寄快递', '购买超级会员', '兑换商品']
+        all_done = True
+        for item in items:
+            eventStatus = item.get('eventStatus')
+            if eventStatus is None:
+                print(f'当前任务【{item.get("eventName", "未知")}】,状态未知（token 可能失效）')
+                success = False
+                continue
+            eventCode = item.get('eventCode', '')
+            surplusCount = item.get('surplusCount', 0)
+            title = item.get('eventName', '')
+            if title in skip_types:
+                continue
+            if title == '本月寄满3件':
+                surplusCount = 1
+            stu = {"0": "已完成", "1": "未完成"}
+            print(f'当前任务【{title}】,{stu.get(eventStatus, "未知")}')
+            for _ in range(surplusCount):
                 if eventStatus == "1":
-                    all_done = False
-            if all_done:
-                print("任务已全部完成")
-            return True
+                    self.doTask(eventCode, title)
+                    if title == '观看精彩视频':
+                        self.watchAd(title)
+                time.sleep(1)
+            if eventStatus == "1":
+                all_done = False
+        if all_done:
+            print("任务已全部完成")
+        return True
 
     def watchAd(self, title):
         json_data = {"action": "ydmbintegral.ydintegral.obtain.event.integral", "appid": "wjvxmno358lze827",
@@ -159,7 +177,8 @@ class RUN:
         if not self.get_point():
             return False
         self.sign()
-        self.get_TaskList()
+        if not self.get_TaskList():
+            return False
         self.getDrawInfo()
         return True
 

@@ -3,7 +3,7 @@
       找到 Request Headers 中的 Cookie 字段，整段复制
 变量：ONESIGN_MT_COOKIE
 
-cron: 15 8 * * *
+cron: 10 8 * * *
 new Env('MT论坛签到');
 */
 
@@ -61,6 +61,12 @@ function curlGet(url, referer) {
 async function mt() {
     let success = true;
     console.log("【MT论坛】：开始签到...");
+
+    // 随机延迟 1~30 分钟
+    const __delay = Math.floor(Math.random() * 1740) + 60;
+    console.log(`【MT论坛】随机延迟 ${Math.round(__delay / 60)} 分钟`);
+    await new Promise(r => setTimeout(r, __delay * 1000));
+
     if (!cookie) {
         console.log("未配置 ONESIGN_MT_COOKIE 变量或 config.yml 中 mt.cookie");
         process.exit(1);

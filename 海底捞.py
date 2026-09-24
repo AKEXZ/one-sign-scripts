@@ -10,6 +10,7 @@ new Env('海底捞小程序签到')
 """
 import os
 import sys
+import time
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 

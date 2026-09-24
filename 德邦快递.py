@@ -21,6 +21,7 @@ new Env('德邦快递小程序签到')
 import json
 import os
 import sys
+import time
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 

@@ -22,10 +22,10 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-# 随机延迟 1~30 分钟
-_delay = random.randint(60, 1800)
-print(f"【维迈通多多】随机延迟 {_delay // 60} 分 {_delay % 60} 秒")
-time.sleep(_delay)
+# 随机延迟 1~30 分钟（测试时注释）
+# _delay = random.randint(60, 1800)
+# print(f"【维迈通多多】随机延迟 {_delay // 60} 分 {_delay % 60} 秒")
+# time.sleep(_delay)
 
 SCRIPT_NAME = "维迈通多多"
 BASE_URL = "https://eco.trantor.top"
@@ -353,9 +353,12 @@ class RUN:
 
             ts = base_ms - (points_count - i) * step_time_ms
 
-            points.append(f"{round(current_lat, 6)},{round(current_lon, 6)},{alt},0.0,{speed},{ts}")
+            # 方向角 (度)，匹配真实 App 数据格式
+            cur_bearing_deg = round(math.degrees(cur_bearing) % 360, 1)
 
-        return ';'.join(points), base_ms, points_count
+            points.append(f"{round(current_lat, 6)},{round(current_lon, 6)},{alt},{cur_bearing_deg},{speed},{ts}")
+
+        return ';'.join(points), base_ms - points_count * step_time_ms, points_count
 
     def _upload_trajectory_batch(self, user_id, pos_items, upload_time_ms):
         """一次上传多个 .pos 轨迹文件 (匹配真实 App 行为)"""
@@ -367,9 +370,13 @@ class RUN:
 
         for group_id, pos_content, ride_time_ms in pos_items:
             filename = f"{group_id}_{user_id}_{ride_time_ms}_1.5.27.11.pos"
-            files.append(('file', (filename, pos_content.encode('utf-8'), 'application/octet-stream')))
-            weather_data[filename] = [{"1": "1"}]
-            through_city_data[filename] = [{"1": self.region_name}]
+            # 轨迹尾部追加终止标记 0,0,0,0,0,ending_ts
+            ending_content = pos_content + f";0,0,0,0,0,{upload_time_ms}"
+            files.append(('file', (filename, ending_content.encode('utf-8'), 'application/octet-stream')))
+            weather_ts = str(round(ride_time_ms / 1000.0))
+            temperature = str(random.randint(15, 35))
+            weather_data[filename] = [{weather_ts: temperature}]
+            through_city_data[filename] = [{weather_ts: self.region_name}]
 
         data = {
             'token': self.token,
@@ -378,6 +385,7 @@ class RUN:
             'throughCity': json.dumps(through_city_data),
         }
 
+        # === _upload_trajectory_batch ===
         try:
             resp = requests.post(
                 'https://data.trantor.top/uploadLocationFile/trajectory',
@@ -385,7 +393,9 @@ class RUN:
                 files=files,
                 timeout=30,
             )
-            return resp.json()
+            result = resp.json()
+            Log(f"  轨迹上传响应: code={result.get('code')}, msg={result.get('msg', '')}")
+            return result
         except Exception as e:
             Log(f"  轨迹上传异常: {e}")
             return None
@@ -421,28 +431,23 @@ class RUN:
         # 2. 生成 2 段轨迹 (模拟两次骑行，匹配真实 App 行为)
         user_id = self.user_id or '2960774'
 
-        avg_speed_mps = 8.0
-
         pos_items = []
         total_points = 0
         total_distance = 0
         for i in range(2):
             distance = random.randint(1500, 5000)
-            # 估算骑行时长，用于计算合理的时间偏移
-            estimated_duration_s = int(distance / avg_speed_mps)
-            # 两段之间间隔 1~3 分钟
-            gap_s = random.randint(60, 180)
-            time_offset_s = (2 - i) * (estimated_duration_s + gap_s)
+            # 单人骑行用实时时间戳 (time_offset_s=0)，匹配真实 App 行为
+            # 数据时间戳距上传时间不超过当前轨迹段时长，避免被服务器因数据过旧拒绝
 
             pos_content, ride_time_ms, pts_count = self._generate_trajectory(
-                lat, lon, distance_m=distance, time_offset_s=time_offset_s
+                lat, lon, distance_m=distance, time_offset_s=0
             )
             group_id = random.randint(1000000000, 9999999999)
             pos_items.append((group_id, pos_content, ride_time_ms))
             total_points += pts_count
             total_distance += distance
 
-            Log(f"  第{i + 1}段: {distance}m, {pts_count}点, 约{estimated_duration_s // 60}分{estimated_duration_s % 60}秒, group_id={group_id}")
+            Log(f"  第{i + 1}段: {distance}m, {pts_count}点, group_id={group_id}")
             if i == 0:
                 self._sleep()
 
@@ -464,7 +469,7 @@ class RUN:
         filename = f"{random.randint(1000000000, 9999999999)}_{user_id}_{ride_time_ms}_1.5.27.11.pos"
 
         # 群组对讲格式: timestamp:value 而不是 1:value
-        weather_ts = str(ride_time_ms // 1000)
+        weather_ts = str(round(ride_time_ms / 1000.0))
         temperature = str(random.randint(15, 35))
         weather_data = {filename: [{weather_ts: temperature}]}
         through_city_data = {filename: [{weather_ts: self.region_name}]}
@@ -647,9 +652,22 @@ class RUN:
         if need_ride:
             self._sleep()
             self.simulate_riding()
-            # 轨迹上传后等待服务器异步处理完成
-            Log("  等待服务器处理轨迹数据...")
-            time.sleep(5)
+            # 轮询检测服务器是否确认完成，最多等 2 分钟
+            Log("  等待服务器确认骑行任务...")
+            verified = False
+            for retry in range(24):
+                time.sleep(5)
+                tasks_after = self.task_list()
+                if tasks_after:
+                    for t in tasks_after.get('dailyTasks', []):
+                        if '单人骑行' in t.get('taskTitle', '') and t.get('receiveStatus') == 1:
+                            Log(f"  ✅ 骑行任务服务端确认完成 (等待 {(retry + 1) * 5}s)")
+                            verified = True
+                            break
+                if verified:
+                    break
+            if not verified:
+                Log("  ⚠️ 骑行任务 2 分钟内未完成，可能数据被拒")
 
         # 8. 签到日历
         self._sleep()

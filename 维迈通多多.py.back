@@ -194,15 +194,25 @@ class RUN:
             Log("  ── 每日任务 ──")
             for task in data.get('dailyTasks', []):
                 status = '✅' if task.get('receiveStatus') == 1 else '⬜'
-                Log(f"  {status} {task['taskTitle']} (+{task['value']}积分)")
+                extra = f" [type={task.get('type')}, code={task.get('typeCode')}]" if task.get('type') is not None else ''
+                Log(f"  {status} {task['taskTitle']} (+{task['value']}积分){extra}")
             Log("  ── 进阶任务 ──")
             for task in data.get('advancedTasks', []):
                 status = '✅' if task.get('receiveStatus') == 1 else '⬜'
-                Log(f"  {status} {task['taskTitle']} (+{task['value']}积分)")
+                extra = f" [type={task.get('type')}, code={task.get('typeCode')}]" if task.get('type') is not None else ''
+                Log(f"  {status} {task['taskTitle']} (+{task['value']}积分){extra}")
             return data
         else:
             Log(f"  获取任务列表失败: {result}")
             return None
+
+    def _trigger_task(self, task_type):
+        """调用 trigger 接口尝试触发任务完成"""
+        result = self._post('/ecosystem/integral/operation/trigger', data={
+            'type': str(task_type),
+            'userId': str(self.user_id),
+        })
+        return result
 
     # ---- 点赞任务 ----
 
@@ -306,6 +316,8 @@ class RUN:
         current_lon = start_lon
         prev_speed = random.uniform(5, 20)
 
+        ride_start_ms = base_ms - points_count * step_time_ms
+
         for i in range(points_count):
             progress = i / points_count
 
@@ -356,26 +368,32 @@ class RUN:
             # 方向角 (度)，匹配真实 App 数据格式
             cur_bearing_deg = round(math.degrees(cur_bearing) % 360, 1)
 
-            points.append(f"{round(current_lat, 6)},{round(current_lon, 6)},{alt},{cur_bearing_deg},{speed},{ts}")
+            # 真实 App 格式: lat,lon,bearing,alt,speed,ts（bearing 在 alt 前面！）
+            points.append(f"{round(current_lat, 6)},{round(current_lon, 6)},{cur_bearing_deg},{alt},{speed},{ts}")
 
-        return ';'.join(points), base_ms - points_count * step_time_ms, points_count
+        return ';'.join(points), ride_start_ms, points_count, base_ms
 
     def _upload_trajectory_batch(self, user_id, pos_items, upload_time_ms):
         """一次上传多个 .pos 轨迹文件 (匹配真实 App 行为)"""
-        # pos_items: [(group_id, pos_content, ride_time_ms), ...]
+        # pos_items: [(group_id, pos_content, ride_time_ms, ending_ts), ...]
 
         files = []
         weather_data = {}
         through_city_data = {}
 
-        for group_id, pos_content, ride_time_ms in pos_items:
+        for item in pos_items:
+            group_id, pos_content, ride_time_ms, ending_ts = item[:4]
+
             filename = f"{group_id}_{user_id}_{ride_time_ms}_1.5.27.11.pos"
-            # 轨迹尾部追加终止标记 0,0,0,0,0,ending_ts
-            ending_content = pos_content + f";0,0,0,0,0,{upload_time_ms}"
+            # 轨迹尾部追加终止标记 0,0,0,0,0,ending_ts（每段自己的结束时间）
+            ending_content = pos_content + f";0,0,0,0,0,{ending_ts};"
             files.append(('file', (filename, ending_content.encode('utf-8'), 'application/octet-stream')))
-            weather_ts = str(round(ride_time_ms / 1000.0))
-            temperature = str(random.randint(15, 35))
-            weather_data[filename] = [{weather_ts: temperature}]
+
+            # weather: 天气状况代码 (0=晴, 1=多云, 2=阴, 3=小雨, 4=中雨, 5=大雨)
+            weather_code = str(random.randint(0, 3))
+            weather_ts = str(int(math.ceil(ride_time_ms / 1000.0)))
+            weather_data[filename] = [{weather_ts: weather_code}]
+
             through_city_data[filename] = [{weather_ts: self.region_name}]
 
         data = {
@@ -428,34 +446,42 @@ class RUN:
 
         self._sleep()
 
-        # 2. 生成 2 段轨迹 (模拟两次骑行，匹配真实 App 行为)
+        # 骑行前查询骑行数据 (匹配真实 App: 上传轨迹前后各调一次)
+        Log("  骑行前查询数据...")
+        riding_data_before = self._post('/ecosystem/trajectoryData/ridingData', data='white=2')
+        if riding_data_before and riding_data_before.get('code') == 0:
+            Log(f"  骑行前数据: {riding_data_before['data'].get('brandName', '?')} {riding_data_before['data'].get('cyclingName', '?')}")
+        self._sleep()
+
+        # 2. 生成轨迹
         user_id = self.user_id or '2960774'
 
-        pos_items = []
-        total_points = 0
-        total_distance = 0
-        for i in range(2):
-            distance = random.randint(1500, 5000)
-            # 单人骑行用实时时间戳 (time_offset_s=0)，匹配真实 App 行为
-            # 数据时间戳距上传时间不超过当前轨迹段时长，避免被服务器因数据过旧拒绝
+        # 单段轨迹 (当前时间, 匹配真实 App 行为)
+        distance = random.randint(2000, 10000)
+        time_offset_s = 0
 
-            pos_content, ride_time_ms, pts_count = self._generate_trajectory(
-                lat, lon, distance_m=distance, time_offset_s=0
-            )
-            group_id = random.randint(1000000000, 9999999999)
-            pos_items.append((group_id, pos_content, ride_time_ms))
-            total_points += pts_count
-            total_distance += distance
+        pos_content, ride_time_ms, pts_count, base_ms = self._generate_trajectory(
+            lat, lon, distance_m=distance, time_offset_s=time_offset_s
+        )
+        group_id = random.randint(1000000000, 9999999999)
+        ending_ts = int(time.time() * 1000) - time_offset_s * 1000
+        pos_items = [(group_id, pos_content, ride_time_ms, ending_ts)]
 
-            Log(f"  第{i + 1}段: {distance}m, {pts_count}点, group_id={group_id}")
-            if i == 0:
-                self._sleep()
+        estimated_duration_s = int(distance / 8.0)
+        Log(f"  轨迹: {distance}m, {pts_count}点, 约{estimated_duration_s // 60}分{estimated_duration_s % 60}秒, group_id={group_id}")
 
         upload_time_ms = int(time.time() * 1000)
-        Log(f"  上传 {len(pos_items)} 段轨迹 (共{total_distance}m, {total_points}点) ...")
+        Log(f"  上传轨迹 ({distance}m, {pts_count}点) ...")
         upload_result = self._upload_trajectory_batch(user_id, pos_items, upload_time_ms)
         if upload_result and upload_result.get('code') == 200:
             Log("  轨迹上传成功！")
+            self._sleep()
+            Log("  查询骑行数据...")
+            riding_data = self._post('/ecosystem/trajectoryData/ridingData', data='white=2')
+            if riding_data and riding_data.get('code') == 0:
+                brand = riding_data['data'].get('brandName', '未知')
+                bike = riding_data['data'].get('cyclingName', '未知')
+                Log(f"  骑行数据: {brand} {bike}")
             return True
         else:
             Log(f"  轨迹上传失败: {upload_result}")
@@ -463,41 +489,6 @@ class RUN:
             return False
 
     # ---- 群组对讲 ----
-
-    def _upload_group_trajectory(self, user_id, pos_content, ride_time_ms, upload_time_ms):
-        """群组对讲专用上传 (1个文件, timestamp格式weather/throughCity, 尾部终止标记)"""
-        filename = f"{random.randint(1000000000, 9999999999)}_{user_id}_{ride_time_ms}_1.5.27.11.pos"
-
-        # 群组对讲格式: timestamp:value 而不是 1:value
-        weather_ts = str(round(ride_time_ms / 1000.0))
-        temperature = str(random.randint(15, 35))
-        weather_data = {filename: [{weather_ts: temperature}]}
-        through_city_data = {filename: [{weather_ts: self.region_name}]}
-
-        # 轨迹尾部追加终止标记 0,0,0,0,0,ending_ts
-        ending_content = pos_content + f";0,0,0,0,0,{upload_time_ms}"
-
-        files = [
-            ('file', (filename, ending_content.encode('utf-8'), 'application/octet-stream')),
-        ]
-        data = {
-            'token': self.token,
-            'time': str(upload_time_ms),
-            'weather': json.dumps(weather_data),
-            'throughCity': json.dumps(through_city_data),
-        }
-
-        try:
-            resp = requests.post(
-                'https://data.trantor.top/uploadLocationFile/trajectory',
-                data=data,
-                files=files,
-                timeout=30,
-            )
-            return resp.json()
-        except Exception as e:
-            Log(f"  轨迹上传异常: {e}")
-            return None
 
     def simulate_group_intercom(self):
         global success
@@ -513,39 +504,7 @@ class RUN:
 
         user_id = self.user_id or '2960774'
 
-        # 1. 打卡记录上报
-        Log("  上报打卡记录...")
-        try:
-            punch_ids = self._get_recommend_punchpoints(need_count=2)
-        except Exception:
-            punch_ids = []
-        if len(punch_ids) >= 2:
-            punch_param = f"punchIds=%5B{punch_ids[0]}%2C{punch_ids[1]}%5D"
-            punch_result = self._post('/ecosystem/punchrecord/add', data=punch_param)
-            if punch_result and punch_result.get('code') == 0:
-                Log(f"  打卡记录上报成功 (punchIds=[{punch_ids[0]},{punch_ids[1]}])")
-            else:
-                Log(f"  打卡记录上报: {punch_result}")
-        else:
-            Log("  跳过打卡记录 (无可用打卡点)")
-
-        # 2. 骑行数据
-        Log("  查询骑行数据...")
-        riding_data = self._post('/ecosystem/trajectoryData/ridingData', data='white=2')
-        if riding_data and riding_data.get('code') == 0:
-            brand = riding_data['data'].get('brandName', '未知')
-            bike = riding_data['data'].get('cyclingName', '未知')
-            Log(f"  骑行数据: {brand} {bike}")
-        else:
-            Log(f"  骑行数据查询: {riding_data}")
-
-        # 3. 打卡点信息
-        point_info = self._post('/ecosystem/punchpoint/myInfo')
-        if point_info and point_info.get('code') == 0:
-            Log(f"  打卡信息 - 收藏:{point_info['data']['collectTotal']} 打卡:{point_info['data']['pointTotal']} 点赞:{point_info['data']['likeTotal']}")
-
-        # 4. 上报设备连接
-        self._sleep()
+        # 1. 上报设备连接
         Log("  上报设备连接...")
         device_result = self._post('/ecosystem/deviceConnect/report', data={
             'province': '河南省',
@@ -561,25 +520,51 @@ class RUN:
 
         self._sleep()
 
-        # 5. 生成并上传轨迹 (群组对讲格式: 1个文件，时间戳设 1~8 小时前)
-        distance = random.randint(1500, 5000)
-        estimated_duration_s = int(distance / 8.0)
-        # 群组对讲的时间戳比单人骑行更早，随机 1~8 小时前 (不会让脚本等 8 小时)
-        time_offset_s = random.randint(3600, 28800)
-        pos_content, ride_time_ms, pts_count = self._generate_trajectory(
+        # 2. 骑行前查询骑行数据 (匹配真实 App)
+        Log("  骑行前查询数据...")
+        riding_data_before = self._post('/ecosystem/trajectoryData/ridingData', data='white=2')
+        if riding_data_before and riding_data_before.get('code') == 0:
+            Log(f"  骑行前数据: {riding_data_before['data'].get('brandName', '?')} {riding_data_before['data'].get('cyclingName', '?')}")
+        self._sleep()
+
+        # 3. 生成并上传轨迹 (时间戳为现在，晚于单人骑行 60-120 分钟)
+        distance = random.randint(2000, 10000)
+        time_offset_s = 0
+
+        pos_content, ride_time_ms, pts_count, base_ms = self._generate_trajectory(
             lat, lon, distance_m=distance, time_offset_s=time_offset_s
         )
-        Log(f"  轨迹: {distance}m, {pts_count}点, 约{estimated_duration_s // 60}分{estimated_duration_s % 60}秒 (时间偏移 {time_offset_s // 3600}h{time_offset_s % 3600 // 60}m前)")
+        # 使用 user_id 作为 group_id (7位数字，匹配抓包中的格式)
+        group_id = int(user_id)
+        ending_ts = int(time.time() * 1000)
+        pos_items = [(group_id, pos_content, ride_time_ms, ending_ts)]
 
-        upload_time_ms = int(time.time() * 1000)
-        upload_result = self._upload_group_trajectory(user_id, pos_content, ride_time_ms, upload_time_ms)
-        if upload_result and upload_result.get('code') == 200:
-            Log("  轨迹上传成功！")
-            return True
-        else:
-            Log(f"  轨迹上传失败: {upload_result}")
-            success = False
-            return False
+        estimated_duration_s = int(distance / 8.0)
+        Log(f"  轨迹: {distance}m, {pts_count}点, 约{estimated_duration_s // 60}分{estimated_duration_s % 60}秒, group_id={group_id}")
+
+        # 4. 上传轨迹（匹配抓包行为：同一文件上传两次）
+        for upload_idx in range(2):
+            upload_time_ms = int(time.time() * 1000)
+            Log(f"  上传轨迹 第{upload_idx + 1}次 ({distance}m, {pts_count}点) ...")
+            upload_result = self._upload_trajectory_batch(user_id, pos_items, upload_time_ms)
+            if upload_result and upload_result.get('code') == 200:
+                Log(f"  第{upload_idx + 1}次上传成功！")
+            else:
+                Log(f"  第{upload_idx + 1}次上传失败: {upload_result}")
+                success = False
+                return False
+            if upload_idx == 0:
+                self._sleep()
+
+        # 5. 上传后查询骑行数据，触发服务端处理
+        self._sleep()
+        Log("  查询骑行数据...")
+        riding_data = self._post('/ecosystem/trajectoryData/ridingData', data='white=2')
+        if riding_data and riding_data.get('code') == 0:
+            brand = riding_data['data'].get('brandName', '未知')
+            bike = riding_data['data'].get('cyclingName', '未知')
+            Log(f"  骑行数据: {brand} {bike}")
+        return True
 
     # ---- 签到日历 ----
 
@@ -622,8 +607,10 @@ class RUN:
 
         # 4. 检测各任务状态
         need_like = True
-        # need_group = True  # 群组对讲暂不可用 (需要群内成员/对讲数据)
+        need_group = True
         need_ride = True
+        group_task_type = None  # 记录群组对讲任务的 type 值
+        ride_task_type = None   # 记录单人骑行任务的 type 值
         if tasks:
             for t in tasks.get('dailyTasks', []):
                 title = t.get('taskTitle', '')
@@ -631,17 +618,53 @@ class RUN:
                     if '点赞' in title:
                         Log("点赞任务已完成，跳过")
                         need_like = False
-                    # if '群组对讲' in title:
-                    #     Log("群组对讲任务已完成，跳过")
-                    #     need_group = False
+                    if '群组对讲' in title:
+                        Log("群组对讲任务已完成，跳过")
+                        need_group = False
                     if '单人骑行' in title:
                         Log("单人骑行任务已完成，跳过")
                         need_ride = False
+                # 记录任务 type 用于 trigger 接口（可能在直接字段或 extras.type 中）
+                task_type = t.get('type') or (t.get('extras') or {}).get('type')
+                if '群组对讲' in title and task_type is not None:
+                    group_task_type = task_type
+                if '单人骑行' in title and task_type is not None:
+                    ride_task_type = task_type
 
-        # 5. 群组对讲 (暂不可用: 需要群内成员/对讲数据)
-        # if need_group:
-        #     self._sleep()
-        #     self.simulate_group_intercom()
+        # 打印检测到的任务 type
+        if group_task_type is not None:
+            Log(f"  检测到群组对讲任务 type={group_task_type}")
+        else:
+            # 未检测到 type，打印完整的群组任务数据以便调试
+            for t in tasks.get('dailyTasks', []):
+                if '群组对讲' in t.get('taskTitle', ''):
+                    Log(f"  群组对讲任务完整数据: {json.dumps(t, ensure_ascii=False)}")
+                    break
+        if ride_task_type is not None:
+            Log(f"  检测到单人骑行任务 type={ride_task_type}")
+
+        # 5. 群组对讲
+        if need_group:
+            self._sleep()
+            if self.simulate_group_intercom():
+                # 轮询检测 (最多 30 秒)
+                Log("  等待服务端确认群组对讲...")
+                verified = False
+                for retry in range(6):
+                    time.sleep(5)
+                    tasks_after = self.task_list()
+                    if tasks_after:
+                        for t in tasks_after.get('dailyTasks', []):
+                            if '群组对讲' in t.get('taskTitle', '') and t.get('receiveStatus') == 1:
+                                Log(f"  ✅ 群组对讲确认完成 (等待 {(retry + 1) * 5}s)")
+                                verified = True
+                                break
+                    if verified:
+                        break
+                if not verified:
+                    Log("  ⚠️ 群组对讲 30s 内未确认，可能需 App 内完成")
+            else:
+                Log("  ⚠️ 群组对讲模拟失败")
 
         # 6. 点赞任务
         if need_like:
@@ -652,10 +675,10 @@ class RUN:
         if need_ride:
             self._sleep()
             self.simulate_riding()
-            # 轮询检测服务器是否确认完成，最多等 2 分钟
+            # 轮询检测服务器确认 (最多 30 秒)
             Log("  等待服务器确认骑行任务...")
             verified = False
-            for retry in range(24):
+            for retry in range(6):
                 time.sleep(5)
                 tasks_after = self.task_list()
                 if tasks_after:
@@ -667,7 +690,7 @@ class RUN:
                 if verified:
                     break
             if not verified:
-                Log("  ⚠️ 骑行任务 2 分钟内未完成，可能数据被拒")
+                Log("  ⚠️ 骑行任务 30 秒内未确认，可能数据被拒")
 
         # 8. 签到日历
         self._sleep()

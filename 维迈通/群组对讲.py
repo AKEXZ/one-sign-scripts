@@ -6,7 +6,7 @@
       可选变量 ONESIGN_VMTDD_LOCATION（经纬度，格式 "lat,lon"，默认洛阳）
       可选变量 ONESIGN_VMTDD_REGION（城市名，默认洛阳市）
 
-cron: 30 9 * * *
+cron: 10 8 * * *
 new Env('维迈通群组对讲');
 """
 import json
@@ -22,6 +22,12 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 SCRIPT_NAME = "维迈通群组对讲"
+
+# 随机延迟 1~30 分钟
+_delay = random.randint(60, 1800)
+print(f"【{SCRIPT_NAME}】随机延迟 {_delay // 60} 分 {_delay % 60} 秒")
+time.sleep(_delay)
+
 BASE_URL = "https://eco.trantor.top"
 success = True
 

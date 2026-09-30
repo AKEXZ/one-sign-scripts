@@ -22,6 +22,12 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 SCRIPT_NAME = "维迈通签到点赞"
+
+# 随机延迟 1~30 分钟
+_delay = random.randint(60, 1800)
+print(f"【{SCRIPT_NAME}】随机延迟 {_delay // 60} 分 {_delay % 60} 秒")
+time.sleep(_delay)
+
 BASE_URL = "https://eco.trantor.top"
 success = True
 

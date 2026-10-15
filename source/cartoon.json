@@ -1,0 +1,108 @@
+[
+  {
+    "bookSourceComment": "松子漫画书源",
+    "bookSourceGroup": "漫画",
+    "bookSourceName": "松子漫画",
+    "bookSourceType": 2,
+    "bookSourceUrl": "https://songzimanhua.com",
+    "bookUrlPattern": "/book/\\d+/",
+    "customButton": false,
+    "customOrder": 1,
+    "enabled": true,
+    "enabledCookieJar": true,
+    "enabledExplore": false,
+    "eventListener": false,
+    "header": "{\"User-Agent\": \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0.1 Safari/605.1.15\", \"Referer\": \"https://songzimanhua.com/\"}",
+    "lastUpdateTime": 0,
+    "respondTime": 180000,
+    "ruleBookInfo": {
+      "author": "@css:.detail-author-line a@text",
+      "coverUrl": "@css:.detail-cover img@src",
+      "intro": "@css:.intro@text",
+      "kind": "@css:.tag-list a@text",
+      "lastChapter": "@css:[data-detail-latest]@text",
+      "name": "@css:h1@text",
+      "tocUrl": "",
+      "wordCount": ""
+    },
+    "ruleContent": {
+      "content": "@js:var h=result;var r=/class=\"reader-page-image\"[^>]*?src=\"([^\"]+)\"/g;var m;var a=[];while((m=r.exec(h))!==null){a.push(m[1]);}var o='';for(var i=0;i<a.length;i++){o+='<img src=\"'+a[i]+'\">\\n';}o;",
+      "imageStyle": "FULL",
+      "nextContentUrl": "",
+      "webJs": ""
+    },
+    "ruleSearch": {
+      "author": "",
+      "bookList": "@css:.comic-grid > a.comic-card",
+      "bookUrl": "href",
+      "coverUrl": "img@src",
+      "intro": "",
+      "kind": "small@text",
+      "lastChapter": "",
+      "name": "strong@text",
+      "wordCount": ""
+    },
+    "ruleToc": {
+      "chapterList": "@css:#all-chapters a",
+      "chapterName": "span@text",
+      "chapterUrl": "href",
+      "isVip": "",
+      "updateTime": ""
+    },
+    "searchUrl": "/search/?q={{key}}",
+    "weight": 0
+  },
+  {
+    "bookSourceComment": "瓜子漫画书源",
+    "bookSourceGroup": "漫画",
+    "bookSourceName": "瓜子漫画",
+    "bookSourceType": 2,
+    "bookSourceUrl": "https://www.guazimanhua.com",
+    "bookUrlPattern": "/comic\\.php\\?id=\\d+",
+    "customButton": false,
+    "customOrder": 0,
+    "enabled": true,
+    "enabledCookieJar": true,
+    "enabledExplore": false,
+    "eventListener": false,
+    "header": "{\"User-Agent\": \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0.1 Safari/605.1.15\", \"Referer\": \"https://www.guazimanhua.com/\"}",
+    "lastUpdateTime": 0,
+    "respondTime": 180000,
+    "ruleBookInfo": {
+      "author": "@css:.cinema-strip div:eq(0) a@text",
+      "coverUrl": "@css:.cinema-cover@src",
+      "intro": "@css:.cinema-info > p@text",
+      "kind": "@css:.cinema-strip div:eq(2) b@text",
+      "lastChapter": "@css:.cinema-strip div:eq(4) b@text",
+      "name": "@css:.cinema-info > h1@text",
+      "tocUrl": "",
+      "wordCount": ""
+    },
+    "ruleContent": {
+      "content": "@js:var h=result;var r=/class=\"reading-image[^\"]*\"[^>]*?src=\"([^\"]+)\"/g;var m;var a=[];while((m=r.exec(h))!==null){a.push(m[1]);}var o='';for(var i=0;i<a.length;i++){o+='<img src=\"'+a[i]+'\">\\n';}o;",
+      "imageStyle": "FULL",
+      "nextContentUrl": "",
+      "webJs": ""
+    },
+    "ruleSearch": {
+      "author": "@css:.meta@text## ·.*",
+      "bookList": "@css:.grid > article.card",
+      "bookUrl": "h3 > a@href",
+      "coverUrl": "@css:img.cover@src",
+      "intro": "",
+      "kind": "@css:.meta@text##.*· ",
+      "lastChapter": "",
+      "name": "@css:h3 > a@text",
+      "wordCount": ""
+    },
+    "ruleToc": {
+      "chapterList": "@xpath://div[contains(@class,'all-chapter-grid')]/a",
+      "chapterName": "text",
+      "chapterUrl": "href",
+      "isVip": "",
+      "updateTime": ""
+    },
+    "searchUrl": "/category.php?keyword={{key}}&page={{page}}",
+    "weight": 0
+  }
+]

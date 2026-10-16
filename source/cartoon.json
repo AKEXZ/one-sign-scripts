@@ -43,7 +43,7 @@
       "wordCount": ""
     },
     "ruleToc": {
-      "chapterList": "@js:var m;var a=[];var r=/<a[^>]*href=\"([^\"]*\\/read\\/\\d+\\/?)\"[^>]*>\\s*<span>([^<]*)<\\/span>\\s*<\\/a>/g;while((m=r.exec(result))!==null){a.push([m[1],m[2]]);}a.reverse();var s='';for(var i=0;i<a.length;i++){s+='<a href=\"'+a[i][0]+'\"><span>'+a[i][1]+'</span></a>';}s;",
+      "chapterList": "-@css:#all-chapters a",
       "chapterName": "span@text",
       "chapterUrl": "href",
       "isVip": "",
@@ -96,7 +96,7 @@
       "wordCount": ""
     },
     "ruleToc": {
-      "chapterList": "@js:var sec=result.match(/<div[^>]*class=\"[^\"]*all-chapter-grid[^\"]*\"[^>]*>([\\s\\S]*?)<\\/div>/);var inner=sec?sec[1]:result;var m;var a=[];var r=/<a[^>]*href=\"(\\/chapter\\.php\\?id=\\d+)\"[^>]*>([^<]+)<\\/a>/g;while((m=r.exec(inner))!==null){a.push([m[1],m[2]]);}a.reverse();var s='';for(var i=0;i<a.length;i++){s+='<a href=\"'+a[i][0]+'\">'+a[i][1]+'</a>';}s;",
+      "chapterList": "-@xpath://div[contains(@class,'all-chapter-grid')]/a",
       "chapterName": "text",
       "chapterUrl": "href",
       "isVip": "",
